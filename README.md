@@ -2,7 +2,7 @@
 
 网页端**钩织模拟小游戏**：拿起虚拟钩针，跟着图解一针一针钩螺旋圈织（amigurumi 玩偶 / 杯垫常用）。
 
-线上地址：https://yun-gouzhi.pages.dev
+线上地址：https://crochet.xuzhuo.xyz （备用 https://yun-gouzhi.pages.dev ）
 
 ## 功能（一期 MVP）
 
