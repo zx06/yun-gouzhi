@@ -1,150 +1,90 @@
-import type { PlacedStitch, StitchType } from '../types/stitch'
+import type { StitchType } from '../types/stitch'
+import { STITCH_COST } from '../types/stitch'
+import type { Work } from './engine'
+import { countProduced } from './pattern'
 
-const BASE_RADIUS = 14
-const RADIUS_PER_ROUND = 16
-const SPIRAL_OFFSET = 0.35
+export const BASE_RADIUS = 20
+export const STEP = 18
 
-export interface PlacementState {
+export interface PlacedStitch {
+  id: string
+  type: StitchType | 'inc-b'
+  x: number
+  y: number
   round: number
-  slotIndex: number
-  stitchesThisRound: number
-  globalActionIndex: number
+  angle: number
 }
 
-export function initialPlacement(): PlacementState {
-  return {
-    round: 1,
-    slotIndex: 0,
-    stitchesThisRound: 0,
-    globalActionIndex: 0,
-  }
+const START = -Math.PI / 2
+
+function pos(round: number, frac: number, extra = 0) {
+  const angle = START + frac * Math.PI * 2
+  const radius = BASE_RADIUS + round * STEP + frac * STEP + extra
+  return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, angle }
 }
 
-/** After each user *action* (not each drawn dot), update round counters */
-export function advancePlacement(
-  state: PlacementState,
-  type: StitchType,
-  roundBoundaries?: number[],
-): PlacementState {
-  const next = { ...state, globalActionIndex: state.globalActionIndex + 1 }
+export interface Layout {
+  stitches: PlacedStitch[]
+  /** where the next stitch will go (hook position) */
+  next: { x: number; y: number; angle: number }
+  maxRadius: number
+}
 
-  if (type === 'ch') {
-    return next
-  }
-
-  if (type === 'dec') {
-    next.stitchesThisRound += 1
-    next.slotIndex += 2
-  } else if (type === 'inc') {
-    next.stitchesThisRound += 2
-    next.slotIndex += 1
-  } else {
-    next.stitchesThisRound += 1
-    next.slotIndex += 1
-  }
-
-  if (roundBoundaries) {
-    const targetRound = getRoundFromActionIndex(next.globalActionIndex, roundBoundaries)
-    if (targetRound > next.round) {
-      next.round = targetRound
-      next.slotIndex = 0
-      next.stitchesThisRound = 0
+/**
+ * Lay out stitches on a spiral. In round k≥1 each stitch sits above the
+ * stitch(es) of the previous round it is worked into, so inc fans out and
+ * dec pulls two together — like the real fabric.
+ */
+export function layoutWork(work: Work, ringSize?: number): Layout {
+  const out: PlacedStitch[] = []
+  let next = pos(0, 0)
+  work.rounds.forEach((round, k) => {
+    const isCurrent = k === work.rounds.length - 1
+    if (k === 0) {
+      const n = countProduced(round)
+      const slots = Math.max(ringSize ?? 6, n + (isCurrent ? 1 : 0), 3)
+      let s = 0
+      let chi = 0
+      round.forEach((t, i) => {
+        if (t === 'ch') {
+          const p = pos(0, s / slots, 9 + chi++ * 3)
+          out.push({ id: `0-${i}`, type: 'ch', round: 0, ...p })
+          return
+        }
+        if (t === 'inc') {
+          out.push({ id: `0-${i}`, type: 'inc', round: 0, ...pos(0, (s + 0.5) / slots) })
+          out.push({ id: `0-${i}b`, type: 'inc-b', round: 0, ...pos(0, (s + 1.5) / slots) })
+          s += 2
+        } else {
+          out.push({ id: `0-${i}`, type: t, round: 0, ...pos(0, (s + 0.5) / slots) })
+          s += 1
+        }
+      })
+      if (isCurrent) next = pos(0, (s + 0.5) / slots)
+      return
     }
-  } else {
-    const expectedInRound = expectedStitchesInRound(next.round)
-    if (next.slotIndex >= expectedInRound) {
-      next.round += 1
-      next.slotIndex = 0
-      next.stitchesThisRound = 0
-    }
-  }
-
-  return next
-}
-
-function getRoundFromActionIndex(index: number, boundaries: number[]): number {
-  for (let r = boundaries.length - 1; r >= 0; r--) {
-    if (index >= boundaries[r]) return r + 1
-  }
-  return 1
-}
-
-function expectedStitchesInRound(round: number): number {
-  if (round === 1) return 6
-  return 6 * round
-}
-
-function stitchCountAfterRound(round: number): number {
-  return 6 * round
-}
-
-export function computeStitchPositions(
-  type: StitchType,
-  placement: PlacementState,
-  idPrefix: string,
-): PlacedStitch[] {
-  const round = placement.round
-  const slot = placement.slotIndex
-  const totalInRound = stitchCountAfterRound(round)
-  const angleStep = (Math.PI * 2) / totalInRound
-  const baseAngle = slot * angleStep - Math.PI / 2 + round * SPIRAL_OFFSET
-
-  const radius =
-    BASE_RADIUS + (round - 1) * RADIUS_PER_ROUND + (slot / totalInRound) * 6
-
-  const mk = (offsetAngle: number, suffix: string, t: StitchType): PlacedStitch => {
-    const angle = baseAngle + offsetAngle
-    return {
-      id: `${idPrefix}-${suffix}`,
-      type: t,
-      x: Math.cos(angle) * radius,
-      y: Math.sin(angle) * radius,
-      round,
-      angle,
-      pop: 0,
-    }
-  }
-
-  switch (type) {
-    case 'ch': {
-      const r = BASE_RADIUS - 8
-      return [
-        {
-          id: `${idPrefix}-ch`,
-          type: 'ch',
-          x: Math.cos(baseAngle) * r,
-          y: Math.sin(baseAngle) * r - 12,
-          round,
-          angle: baseAngle,
-          pop: 0,
-        },
-      ]
-    }
-    case 'inc':
-      return [mk(-0.12, 'a', 'sc'), mk(0.12, 'b', 'sc')]
-    case 'dec':
-      return [mk(0, 'dec', 'dec')]
-    case 'sc':
-    default:
-      return [mk(0, 'sc', 'sc')]
-  }
-}
-
-/** Quadratic bezier between stitch centers for yarn path */
-export function yarnPathPoints(stitches: PlacedStitch[]): { x: number; y: number }[] {
-  if (stitches.length === 0) return []
-  const pts: { x: number; y: number }[] = []
-  for (let i = 0; i < stitches.length; i++) {
-    const s = stitches[i]
-    pts.push({ x: s.x, y: s.y })
-    if (i < stitches.length - 1) {
-      const n = stitches[i + 1]
-      const mx = (s.x + n.x) / 2
-      const my = (s.y + n.y) / 2
-      const cx = mx - (n.y - s.y) * 0.15
-      const cy = my + (n.x - s.x) * 0.15
-      pts.push({ x: cx, y: cy })
-    }
-  }
-  return pts
+    const P = Math.max(1, countProduced(work.rounds[k - 1]))
+    let s = 0
+    let chi = 0
+    round.forEach((t, i) => {
+      const id = `${k}-${i}`
+      if (t === 'ch') {
+        out.push({ id, type: 'ch', round: k, ...pos(k, s / P, 9 + chi++ * 3) })
+        return
+      }
+      chi = 0
+      if (t === 'inc') {
+        out.push({ id, type: 'inc', round: k, ...pos(k, (s + 0.25) / P) })
+        out.push({ id: `${id}b`, type: 'inc-b', round: k, ...pos(k, (s + 0.75) / P) })
+      } else if (t === 'dec') {
+        out.push({ id, type: 'dec', round: k, ...pos(k, (s + 1) / P) })
+      } else {
+        out.push({ id, type: t, round: k, ...pos(k, (s + 0.5) / P) })
+      }
+      s += STITCH_COST[t].consume
+    })
+    if (isCurrent) next = pos(k, Math.min(s + 0.5, P) / P)
+  })
+  const maxRadius = BASE_RADIUS + (work.rounds.length + 1) * STEP
+  return { stitches: out, next, maxRadius }
 }

@@ -1,149 +1,207 @@
 import { useEffect, useRef } from 'react'
 import { Application, Container, Graphics } from 'pixi.js'
 import { useCrochetStore } from '../store/crochetStore'
-import { yarnPathPoints } from '../lib/geometry'
+import { layoutWork, BASE_RADIUS, STEP, type PlacedStitch } from '../lib/geometry'
+import { countProduced } from '../lib/pattern'
 
-const CANVAS_SIZE = 640
+const SIZE = 640
+const POP_MS = 260
+
+function hexNum(c: string) {
+  return parseInt(c.replace('#', ''), 16)
+}
+
+function shade(color: number, f: number) {
+  const r = Math.min(255, Math.round(((color >> 16) & 255) * f))
+  const g = Math.min(255, Math.round(((color >> 8) & 255) * f))
+  const b = Math.min(255, Math.round((color & 255) * f))
+  return (r << 16) | (g << 8) | b
+}
+
+/** Draw a single stitch as a little yarn loop oriented along the radius. */
+function drawStitch(g: Graphics, s: PlacedStitch, color: number, scale: number) {
+  const dirX = Math.cos(s.angle)
+  const dirY = Math.sin(s.angle)
+  const tx = -dirY
+  const ty = dirX
+  const len = 7 * scale
+  const w = 4.2 * scale
+  if (s.type === 'ch') {
+    g.ellipse(s.x, s.y, 4 * scale, 2.6 * scale)
+    g.stroke({ width: 2.2, color: shade(color, 0.8) })
+    return
+  }
+  // V-shaped loop: two strands from the base to the top
+  const bx = s.x - dirX * len * 0.5
+  const by = s.y - dirY * len * 0.5
+  const top1x = s.x + dirX * len * 0.5 + tx * w * 0.5
+  const top1y = s.y + dirY * len * 0.5 + ty * w * 0.5
+  const top2x = s.x + dirX * len * 0.5 - tx * w * 0.5
+  const top2y = s.y + dirY * len * 0.5 - ty * w * 0.5
+  g.ellipse(s.x, s.y, 5.2 * scale, 5.2 * scale)
+  g.fill({ color, alpha: 0.95 })
+  g.moveTo(bx, by)
+  g.lineTo(top1x, top1y)
+  g.moveTo(bx, by)
+  g.lineTo(top2x, top2y)
+  g.stroke({ width: 1.4, color: shade(color, 1.45), alpha: 0.9, cap: 'round' })
+  if (s.type === 'dec') {
+    g.moveTo(s.x - tx * 6 * scale, s.y - ty * 6 * scale)
+    g.lineTo(s.x + tx * 6 * scale, s.y + ty * 6 * scale)
+    g.stroke({ width: 1.2, color: 0x1e3a8a, alpha: 0.7 })
+  }
+  if (s.type === 'inc' || s.type === 'inc-b') {
+    g.circle(s.x, s.y, 6.6 * scale)
+    g.stroke({ width: 1, color: 0x166534, alpha: 0.45 })
+  }
+}
 
 export function CrochetCanvas() {
-  const containerRef = useRef<HTMLDivElement>(null)
+  const mountRef = useRef<HTMLDivElement>(null)
   const appRef = useRef<Application | null>(null)
-  const worldRef = useRef<Container | null>(null)
-  const yarnRef = useRef<Graphics | null>(null)
-  const stitchesRef = useRef<Graphics | null>(null)
-  const hookRef = useRef<Graphics | null>(null)
+  const layers = useRef<{ world: Container; guide: Graphics; yarn: Graphics; st: Graphics; hook: Graphics } | null>(null)
+  const births = useRef(new Map<string, number>())
+  const known = useRef(new Set<string>())
+  const redrawRef = useRef<() => void>(() => {})
 
-  const stitches = useCrochetStore((s) => s.stitches)
+  const work = useCrochetStore((s) => s.work)
   const yarnColor = useCrochetStore((s) => s.yarnColor)
-  const popTick = useCrochetStore((s) => s.popTick)
-  const setRenderer = useCrochetStore((s) => s.setRenderer)
-  const tickPop = useCrochetStore((s) => s.tickPop)
+  const level = useCrochetStore((s) => s.level)
+  const completed = useCrochetStore((s) => s.completed)
+  const rendererRef = useCrochetStore((s) => s.rendererRef)
 
   useEffect(() => {
     let destroyed = false
-    const mount = containerRef.current
+    const mount = mountRef.current
     if (!mount) return
-
     const app = new Application()
-    appRef.current = app
-    setRenderer(app)
-
-    void app.init({
-      width: CANVAS_SIZE,
-      height: CANVAS_SIZE,
-      backgroundAlpha: 0,
-      antialias: true,
-      resolution: Math.min(window.devicePixelRatio || 1, 2),
-      autoDensity: true,
-    }).then(() => {
-      if (destroyed) {
-        app.destroy(true)
-        return
-      }
-      mount.appendChild(app.canvas)
-      app.canvas.style.width = '100%'
-      app.canvas.style.height = 'auto'
-      app.canvas.style.maxWidth = `${CANVAS_SIZE}px`
-      app.canvas.style.display = 'block'
-      app.canvas.style.touchAction = 'none'
-
-      const world = new Container()
-      world.x = CANVAS_SIZE / 2
-      world.y = CANVAS_SIZE / 2
-      worldRef.current = world
-      app.stage.addChild(world)
-
-      const grid = new Graphics()
-      grid.circle(0, 0, 28)
-      grid.stroke({ width: 1, color: 0xd97706, alpha: 0.35 })
-      for (let r = 1; r <= 5; r++) {
-        grid.circle(0, 0, 14 + r * 16)
-        grid.stroke({ width: 1, color: 0xfbbf24, alpha: 0.2 })
-      }
-      world.addChild(grid)
-
-      const yarn = new Graphics()
-      yarnRef.current = yarn
-      world.addChild(yarn)
-
-      const stitchG = new Graphics()
-      stitchesRef.current = stitchG
-      world.addChild(stitchG)
-
-      const hook = new Graphics()
-      hookRef.current = hook
-      world.addChild(hook)
-
-      app.ticker.add(() => tickPop())
-    })
-
+    void app
+      .init({
+        width: SIZE,
+        height: SIZE,
+        background: 0xfffbeb,
+        antialias: true,
+        resolution: Math.min(window.devicePixelRatio || 1, 2),
+        autoDensity: true,
+        preference: 'webgl',
+      })
+      .then(() => {
+        if (destroyed) {
+          app.destroy(true)
+          return
+        }
+        appRef.current = app
+        rendererRef.current = app
+        app.canvas.style.width = '100%'
+        app.canvas.style.height = 'auto'
+        app.canvas.style.display = 'block'
+        app.canvas.style.borderRadius = '1rem'
+        mount.appendChild(app.canvas)
+        const world = new Container()
+        world.position.set(SIZE / 2, SIZE / 2)
+        const guide = new Graphics()
+        const yarn = new Graphics()
+        const st = new Graphics()
+        const hook = new Graphics()
+        world.addChild(guide, yarn, st, hook)
+        const bg = new Graphics().rect(0, 0, SIZE, SIZE).fill(0xfffbeb)
+        app.stage.addChild(bg, world)
+        layers.current = { world, guide, yarn, st, hook }
+        app.ticker.add(() => {
+          if (births.current.size > 0) redrawRef.current()
+        })
+        redrawRef.current()
+      })
     return () => {
       destroyed = true
-      setRenderer(null)
+      rendererRef.current = null
+      layers.current = null
       if (appRef.current) {
         appRef.current.destroy(true, { children: true })
         appRef.current = null
       }
-      mount.innerHTML = ''
     }
-  }, [setRenderer, tickPop])
+  }, [rendererRef])
 
   useEffect(() => {
-    const app = appRef.current
-    const yarn = yarnRef.current
-    const stitchG = stitchesRef.current
-    const hook = hookRef.current
-    if (!app || !yarn || !stitchG || !hook) return
+    const ringSize = level ? countProduced(level.rounds[0]) : undefined
+    const layout = layoutWork(work, ringSize)
+    const now = performance.now()
+    const ids = new Set(layout.stitches.map((s) => s.id))
+    for (const s of layout.stitches) {
+      if (!known.current.has(s.id)) births.current.set(s.id, now)
+    }
+    known.current = ids
+    const color = hexNum(yarnColor)
+    const targetRounds = level ? level.rounds.length : work.rounds.length
 
-    const colorNum = parseInt(yarnColor.replace('#', ''), 16)
+    redrawRef.current = () => {
+      const L = layers.current
+      if (!L) return
+      const t = performance.now()
+      const outer = Math.max(layout.maxRadius, BASE_RADIUS + (targetRounds + 1) * STEP)
+      L.world.scale.set(Math.min(2.2, (SIZE / 2 - 24) / outer))
 
-    yarn.clear()
-    if (stitches.length >= 2) {
-      const path = yarnPathPoints(stitches)
-      yarn.moveTo(path[0].x, path[0].y)
-      for (let i = 1; i < path.length; i++) {
-        const p = path[i]
-        if (i % 2 === 1 && i + 1 < path.length) {
-          const next = path[i + 1]
-          yarn.quadraticCurveTo(p.x, p.y, next.x, next.y)
-          i++
-        } else {
-          yarn.lineTo(p.x, p.y)
+      L.guide.clear()
+      L.guide.circle(0, 0, BASE_RADIUS * 0.55)
+      L.guide.stroke({ width: 1.5, color: 0xd97706, alpha: 0.45 })
+      for (let r = 0; r < targetRounds; r++) {
+        L.guide.circle(0, 0, BASE_RADIUS + r * STEP + STEP / 2)
+        L.guide.stroke({ width: 1, color: 0xf59e0b, alpha: 0.18 })
+      }
+
+      L.yarn.clear()
+      const pts = layout.stitches
+      if (pts.length > 1) {
+        L.yarn.moveTo(pts[0].x, pts[0].y)
+        for (let i = 1; i < pts.length; i++) {
+          const a = pts[i - 1]
+          const b = pts[i]
+          const mx = (a.x + b.x) / 2 - (b.y - a.y) * 0.18
+          const my = (a.y + b.y) / 2 + (b.x - a.x) * 0.18
+          L.yarn.quadraticCurveTo(mx, my, b.x, b.y)
         }
+        L.yarn.stroke({ width: 2.2, color: shade(color, 0.75), alpha: 0.55, cap: 'round', join: 'round' })
       }
-      yarn.stroke({ width: 4, color: colorNum, cap: 'round', join: 'round', alpha: 0.85 })
-    }
 
-    stitchG.clear()
-    for (const s of stitches) {
-      const pop = s.pop ?? 1
-      const scale = 0.6 + pop * 0.4
-      stitchG.circle(s.x, s.y, 5 * scale)
-      stitchG.fill({ color: colorNum, alpha: 0.95 })
-      stitchG.stroke({ width: 1, color: 0x78350f, alpha: 0.5 })
-      if (pop > 0.6 && (s.type === 'inc' || s.type === 'dec')) {
-        stitchG.moveTo(s.x - 3, s.y)
-        stitchG.lineTo(s.x + 3, s.y)
-        stitchG.stroke({ width: 1, color: 0xffffff, alpha: 0.7 })
+      L.st.clear()
+      for (const s of pts) {
+        const b = births.current.get(s.id)
+        let scale = 1
+        if (b !== undefined) {
+          const p = (t - b) / POP_MS
+          if (p >= 1) births.current.delete(s.id)
+          else scale = 0.3 + 0.9 * Math.sin(Math.min(1, p) * Math.PI * 0.75) // overshoot pop
+        }
+        drawStitch(L.st, s, color, scale)
+      }
+
+      L.hook.clear()
+      if (!completed) {
+        const n = layout.next
+        const pulse = 1 + 0.15 * Math.sin(t / 180)
+        L.hook.circle(n.x, n.y, 7 * pulse)
+        L.hook.stroke({ width: 2, color: 0x0ea5e9, alpha: 0.8 })
+        // hook shaft pointing outward
+        const ox = Math.cos(n.angle)
+        const oy = Math.sin(n.angle)
+        const hx = n.x + ox * 10
+        const hy = n.y + oy * 10
+        L.hook.moveTo(hx, hy)
+        L.hook.lineTo(hx + ox * 34 + oy * 6, hy + oy * 34 - ox * 6)
+        L.hook.stroke({ width: 4, color: 0x78716c, cap: 'round' })
+        L.hook.arc(hx, hy, 4, n.angle + Math.PI * 0.5, n.angle + Math.PI * 1.6)
+        L.hook.stroke({ width: 3, color: 0x57534e, cap: 'round' })
       }
     }
-
-    hook.clear()
-    const last = stitches[stitches.length - 1]
-    const hx = last ? last.x + 18 : 0
-    const hy = last ? last.y - 14 : -20
-    hook.moveTo(hx, hy)
-    hook.lineTo(hx + 22, hy - 8)
-    hook.lineTo(hx + 20, hy + 4)
-    hook.stroke({ width: 3, color: 0x57534e, cap: 'round' })
-    hook.circle(hx + 22, hy - 2, 5)
-    hook.stroke({ width: 2, color: 0xa8a29e })
-  }, [stitches, yarnColor, popTick])
+    redrawRef.current()
+  }, [work, yarnColor, level, completed])
 
   return (
     <div
-      ref={containerRef}
-      className="mx-auto w-full max-w-[min(100vw-1.5rem,640px)] rounded-2xl bg-amber-50/80 shadow-inner ring-1 ring-amber-200/80"
+      ref={mountRef}
+      className="mx-auto aspect-square w-full max-w-[min(100%,560px)] overflow-hidden rounded-2xl shadow-inner ring-1 ring-amber-200"
+      role="img"
       aria-label="钩织画布"
     />
   )

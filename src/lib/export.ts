@@ -1,33 +1,46 @@
 import { useCrochetStore } from '../store/crochetStore'
-import { exportJsonPayload } from './patternText'
+import { finishedRounds } from './engine'
+import { formatPattern } from './pattern'
 
-export function downloadJson(filename: string, data: unknown) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
+function download(filename: string, href: string) {
   const a = document.createElement('a')
-  a.href = url
+  a.href = href
   a.download = filename
+  document.body.appendChild(a)
   a.click()
-  URL.revokeObjectURL(url)
+  a.remove()
+}
+
+export function buildProjectJson() {
+  const { work, yarnColor, mode, level } = useCrochetStore.getState()
+  const rounds = finishedRounds(work)
+  const closedRounds = work.rounds.slice(0, -1)
+  const inProgress = work.rounds[work.rounds.length - 1]
+  return {
+    app: 'yun-gouzhi',
+    version: 2,
+    mode,
+    levelId: level?.id ?? null,
+    yarnColor,
+    rounds,
+    closedRounds: closedRounds.length,
+    inProgressRound: inProgress.length ? inProgress : null,
+    patternZh: formatPattern(closedRounds, 'zh'),
+    patternEn: formatPattern(closedRounds, 'en'),
+    exportedAt: new Date().toISOString(),
+  }
 }
 
 export function exportProjectJson() {
-  const { actions, stitches, yarnColor, mode } = useCrochetStore.getState()
-  const payload = exportJsonPayload(
-    actions,
-    stitches.map(({ type, x, y, round }) => ({ type, x, y, round })),
-    yarnColor,
-    mode,
-  )
-  downloadJson(`yun-gouzhi-${Date.now()}.json`, payload)
+  const blob = new Blob([JSON.stringify(buildProjectJson(), null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  download(`yun-gouzhi-${Date.now()}.json`, url)
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export function exportCanvasPng() {
+export async function exportCanvasPng() {
   const app = useCrochetStore.getState().rendererRef.current
   if (!app) return
-  const canvas = app.canvas
-  const link = document.createElement('a')
-  link.download = `yun-gouzhi-${Date.now()}.png`
-  link.href = canvas.toDataURL('image/png')
-  link.click()
+  const url = await app.renderer.extract.base64({ target: app.stage, format: 'png' })
+  download(`yun-gouzhi-${Date.now()}.png`, url)
 }

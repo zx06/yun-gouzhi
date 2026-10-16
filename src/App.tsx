@@ -1,95 +1,117 @@
-import { COASTER_TUTORIAL } from './patterns/coasterTutorial'
 import { CrochetCanvas } from './components/CrochetCanvas'
 import { StitchToolbar } from './components/StitchToolbar'
 import { SandboxPanel } from './components/SandboxPanel'
+import { LevelPanel } from './components/LevelPanel'
 import { CompletionCelebration } from './components/CompletionCelebration'
 import { useCrochetStore } from './store/crochetStore'
+import { COASTER_LEVEL } from './patterns/levels'
+import { STITCH_LABELS, type StitchType } from './types/stitch'
+
+function NotationToggle() {
+  const notation = useCrochetStore((s) => s.notation)
+  const setNotation = useCrochetStore((s) => s.setNotation)
+  return (
+    <div className="inline-flex rounded-lg bg-white/80 p-0.5 text-xs ring-1 ring-amber-200" role="group" aria-label="图解写法">
+      {(['zh', 'en'] as const).map((n) => (
+        <button
+          key={n}
+          type="button"
+          onClick={() => setNotation(n)}
+          className={`min-h-[32px] rounded-md px-2 ${notation === n ? 'bg-amber-500 font-semibold text-white' : 'text-amber-900'}`}
+        >
+          {n === 'zh' ? 'X/V/A' : 'sc/inc'}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 function MenuScreen() {
-  const startTutorial = useCrochetStore((s) => s.startTutorial)
+  const startLevel = useCrochetStore((s) => s.startLevel)
   const startSandbox = useCrochetStore((s) => s.startSandbox)
+  const best = useCrochetStore((s) => s.bestStars[COASTER_LEVEL.id] ?? 0)
 
   return (
     <div className="flex min-h-full flex-col items-center justify-center px-4 py-8">
-      <header className="mb-8 text-center">
-        <h1 className="text-3xl font-bold tracking-tight text-amber-950 sm:text-4xl">云钩织</h1>
-        <p className="mt-1 text-sm text-amber-800/90">Cloud Crochet · 螺旋圈织模拟</p>
+      <header className="mb-6 text-center">
+        <div className="text-5xl" aria-hidden>
+          🧶
+        </div>
+        <h1 className="mt-2 text-4xl font-bold tracking-tight text-amber-950">云钩织</h1>
+        <p className="mt-1 text-sm text-amber-800/90">拿起虚拟钩针，跟着图解一针一针钩</p>
       </header>
       <div className="flex w-full max-w-xs flex-col gap-3">
         <button
           type="button"
-          onClick={() => startTutorial()}
-          className="min-h-[52px] rounded-2xl bg-amber-500 px-6 text-lg font-semibold text-white shadow-lg active:bg-amber-600"
+          onClick={() => startLevel()}
+          className="min-h-[60px] rounded-2xl bg-amber-500 px-6 text-lg font-semibold text-white shadow-lg active:bg-amber-600"
         >
-          教程 L1 · 杯垫
+          教程关 · 杯垫
+          <span className="ml-2 text-base tracking-wider">
+            {'★'.repeat(best)}
+            <span className="opacity-40">{'★'.repeat(3 - best)}</span>
+          </span>
         </button>
         <button
           type="button"
           onClick={() => startSandbox()}
-          className="min-h-[52px] rounded-2xl bg-white px-6 text-lg font-semibold text-amber-950 shadow-lg ring-1 ring-amber-200 active:bg-amber-50"
+          className="min-h-[60px] rounded-2xl bg-white px-6 text-lg font-semibold text-amber-950 shadow-lg ring-1 ring-amber-200 active:bg-amber-50"
         >
-          自由沙盒 · Sandbox
+          自由沙盒
         </button>
+        <div className="mt-1 flex items-center justify-center gap-2 text-xs text-amber-900/80">
+          图解写法 <NotationToggle />
+        </div>
       </div>
-      <p className="mt-8 max-w-md text-center text-xs text-amber-900/60">
-        点击针法按钮逐针钩织，支持撤销与移动端触控。数据仅存于本机 localStorage。
-      </p>
+      <section className="mt-8 w-full max-w-xs rounded-xl bg-white/70 p-3 text-xs text-amber-950 ring-1 ring-amber-200">
+        <p className="mb-1 font-semibold">针法速查</p>
+        <ul className="space-y-0.5">
+          {(['sc', 'inc', 'dec', 'ch'] as StitchType[]).map((t) => (
+            <li key={t}>
+              <b className="inline-block w-14 font-mono">
+                {STITCH_LABELS[t].symbolZh} / {STITCH_LABELS[t].symbolEn}
+              </b>
+              {STITCH_LABELS[t].zh}：{STITCH_LABELS[t].tipZh}
+            </li>
+          ))}
+        </ul>
+      </section>
+      <p className="mt-6 max-w-xs text-center text-[11px] text-amber-900/60">进度与作品只保存在本机浏览器（localStorage），无需登录。</p>
     </div>
   )
 }
 
 function GameScreen() {
   const mode = useCrochetStore((s) => s.mode)
+  const level = useCrochetStore((s) => s.level)
   const goMenu = useCrochetStore((s) => s.goMenu)
   const completed = useCrochetStore((s) => s.completed)
-  const tutorialStep = useCrochetStore((s) => s.tutorialStep)
-  const total = COASTER_TUTORIAL.sequence.length
 
   return (
-    <div className="flex min-h-full flex-col pb-safe">
-      <header className="flex items-center justify-between gap-2 px-3 py-2 sm:px-4">
-        <button
-          type="button"
-          onClick={() => goMenu()}
-          className="min-h-[44px] rounded-lg px-2 text-sm font-medium text-amber-900 active:bg-amber-100"
-        >
+    <div className="flex min-h-full flex-col">
+      <header className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-amber-50/90 px-3 py-2 backdrop-blur">
+        <button type="button" onClick={() => goMenu()} className="min-h-[40px] rounded-lg px-2 text-sm font-medium text-amber-900 active:bg-amber-100">
           ← 菜单
         </button>
-        <div className="text-center text-sm font-medium text-amber-950">
-          {mode === 'tutorial' ? (
-            <>
-              {COASTER_TUTORIAL.titleZh}
-              <span className="ml-2 text-amber-700">
-                {tutorialStep}/{total}
-              </span>
-            </>
-          ) : (
-            '自由沙盒 · Sandbox'
-          )}
-        </div>
-        <div className="w-14" aria-hidden />
+        <h1 className="truncate text-base font-semibold text-amber-950">{mode === 'level' ? level?.title : '自由沙盒'}</h1>
+        <NotationToggle />
       </header>
-
-      {mode === 'tutorial' && (
-        <p className="px-4 text-center text-xs text-amber-800/80">
-          {COASTER_TUTORIAL.descriptionZh}
-        </p>
-      )}
-
-      <main className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-3 px-3 pb-6 pt-1 sm:px-4">
-        <CrochetCanvas />
-        <StitchToolbar />
-        {mode === 'sandbox' && <SandboxPanel />}
+      <main className="mx-auto grid w-full max-w-5xl flex-1 gap-3 px-3 pb-8 pt-2 md:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="flex flex-col gap-3">
+          <CrochetCanvas />
+          {mode === 'level' && level && <p className="text-center text-xs text-amber-800/90">{level.description}</p>}
+        </div>
+        <div className="flex flex-col gap-3">
+          <StitchToolbar />
+          {mode === 'level' ? <LevelPanel /> : <SandboxPanel />}
+        </div>
       </main>
-
-      {completed && mode === 'tutorial' && <CompletionCelebration onClose={() => goMenu()} />}
+      {completed && mode === 'level' && <CompletionCelebration />}
     </div>
   )
 }
 
 export default function App() {
   const mode = useCrochetStore((s) => s.mode)
-
-  if (mode === 'menu') return <MenuScreen />
-  return <GameScreen />
+  return mode === 'menu' ? <MenuScreen /> : <GameScreen />
 }

@@ -1,51 +1,31 @@
 # 云钩织 · Cloud Crochet
 
-交互式螺旋圈织（钩织）模拟小游戏 — 纯前端静态 Web 应用。
+网页端**钩织模拟小游戏**：拿起虚拟钩针，跟着图解一针一针钩螺旋圈织（amigurumi 玩偶 / 杯垫常用）。
 
-Interactive spiral round-crochet mini-game — static frontend web app.
+线上地址：https://yun-gouzhi.pages.dev
 
-## 功能 · Features
+## 功能（一期 MVP）
 
-- **教程 L1（杯垫）**：内置图解步骤，逐针校验、错误提示、撤销、完成庆祝。
-- **自由沙盒**：无校验自由钩织；完成后自动生成中英双语图解（符号：`X/V/A/O` 与 `sc/inc/dec/ch`）；导出 PNG / JSON；切换毛线颜色。
-- **技术**：React、TypeScript、Vite、PixiJS、Zustand、Tailwind CSS；数据仅 `localStorage`。
+- **教程关 · 杯垫**：魔术环 6X → 6V → (X,V)*6 → (2X,V)*6 → 24X，实时校验，钩错提示具体哪圈哪针、可撤销，通关按失误数给星级（本地记录最好成绩）。
+- **自由沙盒**：自由钩短针 X/sc、加针 V/inc、减针 A/dec、锁针 O/ch；魔术环手动闭合，之后每圈用完上一圈的针自动换圈；实时生成中文 / 英文两种图解；换线颜色；导出 PNG、JSON；作品自动保存在 localStorage。
+- **粘贴图解闯关**：支持 `第3圈：(X,V)*6 (18)`、`R4-6: 18 sc`、`(sc, inc) x6`、`sc2tog`、`3短针,加针` 等写法，自动数针、校验每圈针数。
+- 中文符号 / 英文写法一键切换；手机竖屏可玩。
 
-## 本地运行 · Local development
-
-```bash
-npm i
-npm run dev
-```
-
-浏览器打开终端显示的本地地址（默认 `http://localhost:5173`）。
-
-## 构建 · Build
+## 开发
 
 ```bash
-npm run build
+npm ci
+npm run dev      # 本地开发
+npm test         # vitest：图解解析、数针、圈织规则
+npm run build    # 产物在 dist/
 ```
 
-产物在 **`dist/`** 目录，可直接作为静态站点部署。
+技术栈：Vite + React 19 + TypeScript + PixiJS 8 + Zustand + Tailwind 4。纯静态，无后端。
 
-## 部署 · Deploy (Cloudflare Pages)
+## 部署
 
-| 设置 | 值 |
-|------|-----|
-| Build command | `npm run build` |
-| Output directory | `dist` |
-| Node version | 18+ 推荐 |
+Cloudflare Pages（静态，无 Functions）：
 
-无需后端或环境变量（一期 MVP）。
-
-## 针法 · Stitches (v1)
-
-| 英文 | 中文 | 符号 (中) | 符号 (英) |
-|------|------|-----------|-----------|
-| chain | 锁针 | O | ch |
-| single crochet | 短针 | X | sc |
-| increase | 加针 | V | inc |
-| decrease | 减针 | A | dec |
-
-## 许可证
-
-MIT（如仓库未另行说明）。
+```bash
+npm run build && npx wrangler pages deploy dist --project-name yun-gouzhi --branch main
+```
