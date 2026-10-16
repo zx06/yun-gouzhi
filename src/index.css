@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  touch-action: manipulation;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+  background: linear-gradient(160deg, #fffbeb 0%, #fef3c7 40%, #fde68a 100%);
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  touch-action: manipulation;
+}
