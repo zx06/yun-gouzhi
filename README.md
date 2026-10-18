@@ -33,7 +33,23 @@ npm ci
 npm run dev      # 本地开发
 npm test         # vitest：图解解析、数针、圈织规则
 npm run build    # 产物在 dist/
+npm run lint && npm run typecheck
 ```
+
+### 浏览器 e2e（Playwright，Chromium）
+
+两个项目：`desktop`（1280×860）与 `mobile`（手机竖屏 390×844）。
+
+```bash
+npx playwright install chromium   # 首次
+npm run test:e2e                  # 自动构建并启动 vite preview，跑全部用例
+E2E_BASE_URL=https://crochet.xuzhuo.xyz npm run test:e2e   # 只跑 @smoke 用例，对线上冒烟
+PW_CHROMIUM_PATH=/usr/bin/google-chrome npm run test:e2e   # 可选：用本机已装的 Chrome
+```
+
+覆盖：菜单加载无控制台错误；教程关·杯垫（钩错提示、撤销、通关、解锁下一关）；沙盒钩针 + 中英图解 + PNG / JSON 导出（校验下载文件）；我的作品新建 / 重命名 / 复制 / 删除 / 导入导出与刷新保留；一期存档迁移、损坏存档备份；粘贴图解闯关与非法写法拦截；存为我的关卡。每个用例都会断言页面没有控制台错误。
+
+CI（GitHub Actions，`.github/workflows/ci.yml`）：push / PR 时跑 lint、typecheck、vitest、build、e2e，失败时上传 Playwright 报告、截图与 trace。
 
 技术栈：Vite + React 19 + TypeScript + PixiJS 8 + Zustand + Tailwind 4。纯静态，无后端。
 
