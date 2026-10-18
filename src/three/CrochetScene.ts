@@ -153,6 +153,8 @@ export class CrochetScene {
   private yarnGeo: BufferGeometry | null = null
   private yarnMesh: Mesh | null = null
   private capacity = 0
+  /** writeAll 之后、下一次渲染之前：整段上传，不能被动画帧的局部更新覆盖 */
+  private fullUpload = false
   /** 每针的父针（stitches 下标） */
   private parents: number[][] = []
   private surface: Mesh | null = null
@@ -384,6 +386,7 @@ export class CrochetScene {
       attr.clearUpdateRanges()
       attr.needsUpdate = true
     }
+    this.fullUpload = true
     return animating
   }
 
@@ -394,12 +397,13 @@ export class CrochetScene {
     let animating = false
     const vPer = tubeVertexCount(this.layout) * TUBES_PER_STITCH
     const attrs = (['position', 'normal', 'uv', 'color'] as const).map((k) => this.yarnGeo!.getAttribute(k) as BufferAttribute)
-    attrs.forEach((a) => a.clearUpdateRanges())
+    const partial = !this.fullUpload
+    if (partial) attrs.forEach((a) => a.clearUpdateRanges())
     shape.stitches.forEach((s, i) => {
       if (!this.births.has(s.id)) return
       animating = this.writeStitch(i, now) || animating
       for (const a of attrs) {
-        a.addUpdateRange(i * vPer * a.itemSize, vPer * a.itemSize)
+        if (partial) a.addUpdateRange(i * vPer * a.itemSize, vPer * a.itemSize)
         a.needsUpdate = true
       }
     })
@@ -490,6 +494,7 @@ export class CrochetScene {
     const animating = this.births.size > 0 && this.writeBirths(now)
     if (moved || animating || this.dirty || this.spinUntil) {
       this.renderer.render(this.scene, this.camera)
+      this.fullUpload = false
       this.dirty = false
     }
   }
@@ -497,6 +502,7 @@ export class CrochetScene {
   /** 当前画面的 PNG（data URL） */
   snapshot(): string {
     this.renderer.render(this.scene, this.camera)
+    this.fullUpload = false
     return this.renderer.domElement.toDataURL('image/png')
   }
 
