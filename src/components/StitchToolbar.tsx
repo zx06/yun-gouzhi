@@ -15,7 +15,7 @@ export function StitchToolbar() {
   const mode = useCrochetStore((s) => s.mode)
   const work = useCrochetStore((s) => s.work)
   const closeMagicRing = useCrochetStore((s) => s.closeMagicRing)
-  const showGuide = useCrochetStore((s) => s.mode === 'level' && s.level?.id === 'coaster-l1')
+  const showGuide = useCrochetStore((s) => s.mode === 'level' && !!s.level?.guide)
   const expected = useCrochetStore((s) => s.expected())
   const p = progress(work)
 

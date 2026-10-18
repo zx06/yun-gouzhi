@@ -1,9 +1,32 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { exportCanvasPng, exportProjectJson } from '../lib/export'
-import { countProduced, formatPattern, formatRound, parsePattern } from '../lib/pattern'
+import { formatPattern, formatRound } from '../lib/pattern'
 import { finishedRounds } from '../lib/engine'
-import { makeLevelFromRounds } from '../patterns/custom'
 import { useCrochetStore } from '../store/crochetStore'
+import { PatternToLevel } from './PatternToLevel'
+
+function SaveAsLevel() {
+  const workId = useCrochetStore((s) => s.workId)
+  const saveWorkAsLevel = useCrochetStore((s) => s.saveWorkAsLevel)
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  if (!workId) return null
+  return (
+    <div>
+      <button
+        type="button"
+        data-testid="save-work-level"
+        onClick={() => {
+          const res = saveWorkAsLevel(workId)
+          setMsg(res.error ? { text: res.error, ok: false } : { text: `已存为关卡「${res.level?.title}」，在菜单的「我的关卡」里可以闯关`, ok: true })
+        }}
+        className="min-h-[44px] w-full rounded-xl bg-emerald-600 text-sm font-medium text-white active:bg-emerald-700"
+      >
+        ⭐ 把已钩完的圈存为我的关卡
+      </button>
+      {msg && <p className={`mt-1 text-xs ${msg.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{msg.text}</p>}
+    </div>
+  )
+}
 
 const PRESET_COLORS = ['#e11d48', '#f59e0b', '#16a34a', '#2563eb', '#9333ea', '#f5f5f4', '#78350f']
 
@@ -12,10 +35,6 @@ export function SandboxPanel() {
   const setYarnColor = useCrochetStore((s) => s.setYarnColor)
   const work = useCrochetStore((s) => s.work)
   const clearSandbox = useCrochetStore((s) => s.clearSandbox)
-  const customPattern = useCrochetStore((s) => s.customPattern)
-  const setCustomPattern = useCrochetStore((s) => s.setCustomPattern)
-  const startLevel = useCrochetStore((s) => s.startLevel)
-  const [msg, setMsg] = useState<string | null>(null)
 
   const rounds = finishedRounds(work)
   const closed = work.rounds.slice(0, -1)
@@ -33,7 +52,6 @@ export function SandboxPanel() {
       .join('\n')
   const zh = rounds.length ? fmt('zh') : ''
   const en = rounds.length ? fmt('en') : ''
-  const parsed = useMemo(() => parsePattern(customPattern), [customPattern])
 
   return (
     <div className="flex flex-col gap-3">
@@ -85,42 +103,11 @@ export function SandboxPanel() {
         </button>
       </div>
 
+      <SaveAsLevel />
+
       <details className="rounded-xl bg-white/90 p-3 ring-1 ring-amber-200">
         <summary className="cursor-pointer text-sm font-medium text-amber-950">📜 粘贴图解，变成闯关（支持 X/V/A 与 sc/inc/dec）</summary>
-        <textarea
-          value={customPattern}
-          onChange={(e) => setCustomPattern(e.target.value)}
-          rows={7}
-          spellCheck={false}
-          className="mt-2 w-full rounded-lg border border-amber-200 bg-amber-50/50 p-2 font-mono text-[12px]"
-          aria-label="图解文本"
-        />
-        <p className="text-xs text-amber-800">
-          解析出 {parsed.rounds.length} 圈
-          {parsed.rounds.length > 0 && <>，针数：{parsed.rounds.map((r) => countProduced(r.stitches)).join(' → ')}</>}
-        </p>
-        {parsed.errors.length > 0 && (
-          <ul className="mt-1 list-disc pl-4 text-xs text-rose-700">
-            {parsed.errors.slice(0, 5).map((e) => (
-              <li key={e}>{e}</li>
-            ))}
-          </ul>
-        )}
-        {msg && <p className="text-xs text-rose-700">{msg}</p>}
-        <button
-          type="button"
-          disabled={parsed.rounds.length === 0 || parsed.errors.length > 0}
-          onClick={() => {
-            try {
-              startLevel(makeLevelFromRounds(parsed.rounds.map((r) => r.stitches)))
-            } catch (e) {
-              setMsg(String(e))
-            }
-          }}
-          className="mt-2 min-h-[44px] w-full rounded-xl bg-amber-500 text-sm font-semibold text-white disabled:opacity-40 active:bg-amber-600"
-        >
-          按此图解开钩 ▶
-        </button>
+        <PatternToLevel />
       </details>
     </div>
   )
