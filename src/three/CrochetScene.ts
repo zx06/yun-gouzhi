@@ -1,6 +1,7 @@
 /**
  * Three.js 立体预览（单独打包，按需加载）。
- * 只负责把 buildShape() 的结果画出来：织片曲面 + 每针一个毛线圈（正反两面），
+ * 负责把 buildShape() 的结果渲染为逼真毛线质感的立体织片：
+ * 织片底面阴影曲面 + 细毛线管短针（正面 V 字 + 顶链 + 钩入上一圈的立柱），
  * 新钩的针有弹出动画；拖动旋转、滚轮 / 双指缩放。
  */
 import {
@@ -23,8 +24,6 @@ import {
   RepeatWrapping,
   Scene,
   SRGBColorSpace,
-  CapsuleGeometry,
-  SphereGeometry,
   Vector2,
   Vector3,
   WebGLRenderer,
@@ -33,6 +32,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { buildShape, type Shape } from '../lib/shape3d'
 import { colorAt, type ColorChange } from '../lib/colors'
 import type { StitchType } from '../types/stitch'
+import { createStitchGeometry } from './stitchGeometry'
 
 export interface SceneInput {
   rounds: StitchType[][]
@@ -44,31 +44,54 @@ export interface SceneInput {
 const POP_MS = 320
 const BG = 0xfdf3df
 
+/**
+ * 细腻的羊毛/棉线多股捻度与微毛羽贴图。
+ * 用于 map 与 bumpMap，提供哑光触感与螺旋股线起伏。
+ */
 function yarnTexture(): CanvasTexture {
   const c = document.createElement('canvas')
-  c.width = 64
-  c.height = 64
+  c.width = 128
+  c.height = 128
   const g = c.getContext('2d')!
-  g.fillStyle = '#ffffff'
-  g.fillRect(0, 0, 64, 64)
-  // 斜向股线：毛线的捻度
-  for (let i = -64; i < 128; i += 8) {
-    const grad = g.createLinearGradient(i, 0, i + 8, 0)
-    grad.addColorStop(0, 'rgba(0,0,0,0.0)')
-    grad.addColorStop(0.5, 'rgba(0,0,0,0.28)')
-    grad.addColorStop(1, 'rgba(0,0,0,0.0)')
+  g.fillStyle = '#f6f6f6'
+  g.fillRect(0, 0, 128, 128)
+
+  // 股线螺旋捻度 (Twisted plies)
+  const plyWidth = 16
+  for (let x = -128; x < 256; x += plyWidth) {
+    const grad = g.createLinearGradient(x, 0, x + plyWidth, 0)
+    grad.addColorStop(0.0, 'rgba(15, 10, 5, 0.35)')
+    grad.addColorStop(0.2, 'rgba(40, 30, 20, 0.05)')
+    grad.addColorStop(0.5, 'rgba(255, 255, 255, 0.28)')
+    grad.addColorStop(0.8, 'rgba(40, 30, 20, 0.05)')
+    grad.addColorStop(1.0, 'rgba(15, 10, 5, 0.35)')
     g.fillStyle = grad
     g.beginPath()
-    g.moveTo(i, 0)
-    g.lineTo(i + 8, 0)
-    g.lineTo(i + 8 + 32, 64)
-    g.lineTo(i + 32, 64)
+    g.moveTo(x, 0)
+    g.lineTo(x + plyWidth, 0)
+    g.lineTo(x + plyWidth + 64, 128)
+    g.lineTo(x + 64, 128)
     g.closePath()
     g.fill()
   }
+
+  // 细微毛羽噪点 (Woolly fiber fuzz micro-texture)
+  g.fillStyle = 'rgba(0, 0, 0, 0.05)'
+  for (let i = 0; i < 350; i++) {
+    const rx = (i * 37) % 128
+    const ry = (i * 91) % 128
+    g.fillRect(rx, ry, 1, 1)
+  }
+  g.fillStyle = 'rgba(255, 255, 255, 0.12)'
+  for (let i = 0; i < 250; i++) {
+    const rx = (i * 53) % 128
+    const ry = (i * 79) % 128
+    g.fillRect(rx, ry, 1, 1)
+  }
+
   const t = new CanvasTexture(c)
   t.wrapS = t.wrapT = RepeatWrapping
-  t.repeat.set(6, 1)
+  t.repeat.set(4, 2)
   t.colorSpace = SRGBColorSpace
   return t
 }
@@ -97,16 +120,12 @@ export class CrochetScene {
   private scene = new Scene()
   private camera = new PerspectiveCamera(35, 1, 0.1, 500)
   private controls: OrbitControls
-  /** 短针正面是一个 V：两条毛线腿 */
-  private loopGeo = new CapsuleGeometry(0.19, 0.5, 4, 10)
-  /** 反面的小线结 */
-  private bumpGeo = new SphereGeometry(0.3, 10, 8)
+  /** 逼真单针毛线管几何体（V 字 + 顶链 + 钩入立柱 + 背杠） */
+  private stitchGeo = createStitchGeometry()
   private yarnTex = yarnTexture()
-  private loopMat: MeshStandardMaterial
-  private bumpMat: MeshStandardMaterial
+  private stitchMat: MeshStandardMaterial
   private surfaceMat: MeshStandardMaterial
-  private loops: InstancedMesh | null = null
-  private bumps: InstancedMesh | null = null
+  private stitchesMesh: InstancedMesh | null = null
   private surface: Mesh | null = null
   private shadow: Mesh
   /** 作品本体（平片翻过来让正面朝上） */
@@ -132,7 +151,7 @@ export class CrochetScene {
     this.renderer = new WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'low-power' })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
     this.renderer.toneMapping = ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.05
+    this.renderer.toneMappingExposure = 0.96
     this.renderer.outputColorSpace = SRGBColorSpace
     this.renderer.setClearColor(BG)
     const el = this.renderer.domElement
@@ -155,14 +174,13 @@ export class CrochetScene {
     fill.position.set(0, -6, 4)
     this.scene.add(fill)
 
-    this.loopMat = new MeshStandardMaterial({
+    this.stitchMat = new MeshStandardMaterial({
       map: this.yarnTex,
       bumpMap: this.yarnTex,
-      bumpScale: 1.5,
-      roughness: 0.78,
+      bumpScale: 0.5,
+      roughness: 0.92,
       metalness: 0,
     })
-    this.bumpMat = new MeshStandardMaterial({ map: this.yarnTex, roughness: 0.95, metalness: 0 })
     this.surfaceMat = new MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, side: DoubleSide })
 
     this.shadow = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial({ map: shadowTexture(), transparent: true, depthWrite: false }))
@@ -228,20 +246,17 @@ export class CrochetScene {
   }
 
   private ensureInstances(n: number) {
-    const cap = this.bumps?.instanceMatrix.count ?? 0
-    if (n <= cap && this.loops) return
+    const cap = this.stitchesMesh?.instanceMatrix.count ?? 0
+    if (n <= cap && this.stitchesMesh) return
     const size = Math.max(64, 2 ** Math.ceil(Math.log2(n + 1)))
-    for (const m of [this.loops, this.bumps]) if (m) {
-      this.piece.remove(m)
-      m.dispose()
+    if (this.stitchesMesh) {
+      this.piece.remove(this.stitchesMesh)
+      this.stitchesMesh.dispose()
     }
-    this.loops = new InstancedMesh(this.loopGeo, this.loopMat, size * 2)
-    this.bumps = new InstancedMesh(this.bumpGeo, this.bumpMat, size)
-    for (const m of [this.loops, this.bumps]) {
-      m.frustumCulled = false
-      m.count = 0
-      this.piece.add(m)
-    }
+    this.stitchesMesh = new InstancedMesh(this.stitchGeo, this.stitchMat, size)
+    this.stitchesMesh.frustumCulled = false
+    this.stitchesMesh.count = 0
+    this.piece.add(this.stitchesMesh)
   }
 
   private buildSurface(shape: Shape, input: SceneInput) {
@@ -295,7 +310,7 @@ export class CrochetScene {
   private writeInstances(now: number): boolean {
     const shape = this.shape
     const input = this.input
-    if (!shape || !input || !this.loops || !this.bumps) return false
+    if (!shape || !input || !this.stitchesMesh) return false
     let animating = false
     const x = new Vector3()
     const y = new Vector3()
@@ -314,38 +329,31 @@ export class CrochetScene {
       x.set(...s.tangent)
       y.set(...s.up)
       z.set(...s.normal)
-      const lift = 0.1 + (1 - Math.min(k, 1)) * 0.6
+
+      const lift = 0.05 + (1 - Math.min(k, 1)) * 0.4
       const px = s.position[0] + s.normal[0] * lift
       const py = s.position[1] + s.normal[1] * lift
       const pz = s.position[2] + s.normal[2] * lift
       const w = s.width
       this.tmpColor.set(colorAt(s.seq, input.base, input.changes))
       if (b !== undefined && k < 1.05) this.tmpColor.lerp(new Color(0xffffff), Math.max(0, 0.45 * (1 - k)))
-      // 正面：V 字的两条腿，顶部向两侧张开
-      const ang = 0.36
-      const c = Math.cos(ang)
-      const sn = Math.sin(ang)
-      for (const side of [-1, 1]) {
-        const legX = x.clone().multiplyScalar(c).addScaledVector(y, -side * sn)
-        const legY = y.clone().multiplyScalar(c).addScaledVector(x, side * sn)
-        this.tmp.makeBasis(legX.multiplyScalar(k * Math.min(1.3, 0.75 + w * 0.3)), legY.multiplyScalar(k * 1.05), z.clone().multiplyScalar(k * 0.85))
-        const off = side * 0.23 * w * k
-        this.tmp.setPosition(px + x.x * off, py + x.y * off, pz + x.z * off)
-        const idx = i * 2 + (side > 0 ? 1 : 0)
-        this.loops!.setMatrixAt(idx, this.tmp)
-        this.loops!.setColorAt(idx, this.tmpColor)
-      }
-      // 反面：压扁的小线结
-      this.tmp.makeBasis(x.clone().multiplyScalar(w * 0.75 * k), y.clone().multiplyScalar(0.6 * k), z.clone().multiplyScalar(0.35 * k))
-      this.tmp.setPosition(s.position[0] - s.normal[0] * 0.06, s.position[1] - s.normal[1] * 0.06, s.position[2] - s.normal[2] * 0.06)
-      this.bumps!.setMatrixAt(i, this.tmp)
-      this.bumps!.setColorAt(i, this.tmpColor.multiplyScalar(0.85))
+
+      // 针目宽度自适应缩放（微调比例，使毛线管既覆盖圈间距又不被过度拉伸）
+      const sx = k * Math.min(1.25, Math.max(0.75, 0.65 + w * 0.35))
+      const sy = k
+      const sz = k
+      this.tmp.makeBasis(
+        x.clone().multiplyScalar(sx),
+        y.clone().multiplyScalar(sy),
+        z.clone().multiplyScalar(sz)
+      )
+      this.tmp.setPosition(px, py, pz)
+      this.stitchesMesh!.setMatrixAt(i, this.tmp)
+      this.stitchesMesh!.setColorAt(i, this.tmpColor)
     })
-    this.loops.count = shape.stitches.length * 2
-    this.bumps.count = shape.stitches.length
-    this.loops.instanceMatrix.needsUpdate = this.bumps.instanceMatrix.needsUpdate = true
-    if (this.loops.instanceColor) this.loops.instanceColor.needsUpdate = true
-    if (this.bumps.instanceColor) this.bumps.instanceColor.needsUpdate = true
+    this.stitchesMesh.count = shape.stitches.length
+    this.stitchesMesh.instanceMatrix.needsUpdate = true
+    if (this.stitchesMesh.instanceColor) this.stitchesMesh.instanceColor.needsUpdate = true
     return animating
   }
 
@@ -399,15 +407,13 @@ export class CrochetScene {
     this.resizeObs.disconnect()
     this.controls.dispose()
     this.renderer.domElement.removeEventListener('webglcontextlost', this.onLost)
-    for (const m of [this.loops, this.bumps]) m?.dispose()
+    this.stitchesMesh?.dispose()
     this.surface?.geometry.dispose()
-    this.loopGeo.dispose()
-    this.bumpGeo.dispose()
+    this.stitchGeo.dispose()
     this.shadow.geometry.dispose()
     ;(this.shadow.material as MeshBasicMaterial).map?.dispose()
     ;(this.shadow.material as MeshBasicMaterial).dispose()
-    this.loopMat.dispose()
-    this.bumpMat.dispose()
+    this.stitchMat.dispose()
     this.surfaceMat.dispose()
     this.yarnTex.dispose()
     this.renderer.dispose()
