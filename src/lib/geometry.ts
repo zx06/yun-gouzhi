@@ -13,6 +13,8 @@ export interface PlacedStitch {
   y: number
   round: number
   angle: number
+  /** 全局动作序号（含锁针），用于换线颜色 */
+  seq: number
 }
 
 const START = -Math.PI / 2
@@ -38,7 +40,10 @@ export interface Layout {
 export function layoutWork(work: Work, ringSize?: number): Layout {
   const out: PlacedStitch[] = []
   let next = pos(0, 0)
+  const offsets: number[] = []
+  work.rounds.reduce((n, r, k) => ((offsets[k] = n), n + r.length), 0)
   work.rounds.forEach((round, k) => {
+    const base = offsets[k]
     const isCurrent = k === work.rounds.length - 1
     if (k === 0) {
       const n = countProduced(round)
@@ -48,15 +53,15 @@ export function layoutWork(work: Work, ringSize?: number): Layout {
       round.forEach((t, i) => {
         if (t === 'ch') {
           const p = pos(0, s / slots, 9 + chi++ * 3)
-          out.push({ id: `0-${i}`, type: 'ch', round: 0, ...p })
+          out.push({ id: `0-${i}`, type: 'ch', round: 0, seq: base + i, ...p })
           return
         }
         if (t === 'inc') {
-          out.push({ id: `0-${i}`, type: 'inc', round: 0, ...pos(0, (s + 0.5) / slots) })
-          out.push({ id: `0-${i}b`, type: 'inc-b', round: 0, ...pos(0, (s + 1.5) / slots) })
+          out.push({ id: `0-${i}`, type: 'inc', round: 0, seq: base + i, ...pos(0, (s + 0.5) / slots) })
+          out.push({ id: `0-${i}b`, type: 'inc-b', round: 0, seq: base + i, ...pos(0, (s + 1.5) / slots) })
           s += 2
         } else {
-          out.push({ id: `0-${i}`, type: t, round: 0, ...pos(0, (s + 0.5) / slots) })
+          out.push({ id: `0-${i}`, type: t, round: 0, seq: base + i, ...pos(0, (s + 0.5) / slots) })
           s += 1
         }
       })
@@ -69,17 +74,17 @@ export function layoutWork(work: Work, ringSize?: number): Layout {
     round.forEach((t, i) => {
       const id = `${k}-${i}`
       if (t === 'ch') {
-        out.push({ id, type: 'ch', round: k, ...pos(k, s / P, 9 + chi++ * 3) })
+        out.push({ id, type: 'ch', round: k, seq: base + i, ...pos(k, s / P, 9 + chi++ * 3) })
         return
       }
       chi = 0
       if (t === 'inc') {
-        out.push({ id, type: 'inc', round: k, ...pos(k, (s + 0.25) / P) })
-        out.push({ id: `${id}b`, type: 'inc-b', round: k, ...pos(k, (s + 0.75) / P) })
+        out.push({ id, type: 'inc', round: k, seq: base + i, ...pos(k, (s + 0.25) / P) })
+        out.push({ id: `${id}b`, type: 'inc-b', round: k, seq: base + i, ...pos(k, (s + 0.75) / P) })
       } else if (t === 'dec') {
-        out.push({ id, type: 'dec', round: k, ...pos(k, (s + 1) / P) })
+        out.push({ id, type: 'dec', round: k, seq: base + i, ...pos(k, (s + 1) / P) })
       } else {
-        out.push({ id, type: t, round: k, ...pos(k, (s + 0.5) / P) })
+        out.push({ id, type: t, round: k, seq: base + i, ...pos(k, (s + 0.5) / P) })
       }
       s += STITCH_COST[t].consume
     })

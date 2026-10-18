@@ -56,7 +56,9 @@ export function SandboxPanel() {
   return (
     <div className="flex flex-col gap-3">
       <section>
-        <p className="mb-2 text-xs font-medium text-amber-900/80">换线颜色</p>
+        <p className="mb-2 text-xs font-medium text-amber-900/80">
+          换线颜色 <span className="font-normal opacity-80">· 已钩的针保持原色，之后的针用新颜色</span>
+        </p>
         <div className="flex flex-wrap items-center gap-2">
           {PRESET_COLORS.map((c) => (
             <button

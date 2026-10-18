@@ -231,3 +231,28 @@ describe('custom levels', () => {
     expect(S.closedRounds([[]])).toEqual([])
   })
 })
+
+describe('colour changes in saves (phase 4, optional field)', () => {
+  const rounds = [R('sc sc sc sc sc sc'), R('inc inc')]
+  it('phase-2 saves without colours load unchanged (no new field added)', () => {
+    const w = { id: 'w-1', name: 'old', rounds, yarnColor: '#123456', createdAt: 1, updatedAt: 2 }
+    const kv = new MemKV({ [S.DATA_KEY]: JSON.stringify({ version: 3, works: [w], customLevels: [], lastWorkId: null, migrated: [S.LEGACY_SANDBOX_KEY] }) })
+    const r = S.loadData(kv)
+    expect(r.data.works[0]).toEqual(w)
+    expect(r.dirty).toBe(false)
+  })
+  it('keeps valid colour changes, drops bad ones without dropping the work', () => {
+    const w = { id: 'w-1', name: 'c', rounds, yarnColor: '#123456', colors: [{ from: 6, color: '#ABCDEF' }, { from: 'x', color: 1 }], createdAt: 1, updatedAt: 2 }
+    const kv = new MemKV({ [S.DATA_KEY]: JSON.stringify({ version: 3, works: [w], migrated: [S.LEGACY_SANDBOX_KEY] }) })
+    expect(S.loadData(kv).data.works[0].colors).toEqual([{ from: 6, color: '#abcdef' }])
+  })
+  it('export → import round-trips colour changes', () => {
+    const colors = [{ from: 6, color: '#2563eb' }]
+    const exp = S.buildWorkExport({ name: 'c', yarnColor: '#e11d48', rounds, colors })
+    expect(exp.colors).toEqual(colors)
+    const res = S.parseWorkImport(JSON.stringify(exp))
+    expect(res.ok && res.work.colors).toEqual(colors)
+    // 没有换线时不写 colors 字段（和二期导出一致）
+    expect('colors' in S.buildWorkExport({ name: 'c', yarnColor: '#e11d48', rounds })).toBe(false)
+  })
+})

@@ -2,6 +2,25 @@ import { useCrochetStore, starsFor } from '../store/crochetStore'
 import { exportCanvasPng } from '../lib/export'
 import { nextLevel } from '../patterns/levels'
 
+const CONFETTI_COLORS = ['#f59e0b', '#ef4444', '#10b981', '#3b82f6', '#a855f7', '#f472b6']
+const CONFETTI = Array.from({ length: 36 }, (_, i) => ({
+  left: `${(i * 37) % 100}%`,
+  color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+  delay: `${((i * 53) % 60) / 100}s`,
+  t: `${2 + ((i * 29) % 15) / 10}s`,
+  dx: `${((i * 41) % 120) - 60}px`,
+}))
+
+function Confetti() {
+  return (
+    <div aria-hidden>
+      {CONFETTI.map((c, i) => (
+        <span key={i} className="confetti" style={{ left: c.left, background: c.color, animationDelay: c.delay, ['--t' as string]: c.t, ['--dx' as string]: c.dx }} />
+      ))}
+    </div>
+  )
+}
+
 export function CompletionCelebration() {
   const mistakes = useCrochetStore((s) => s.mistakes)
   const level = useCrochetStore((s) => s.level)
@@ -12,7 +31,8 @@ export function CompletionCelebration() {
   const stars = starsFor(mistakes)
   return (
     <div className="fixed inset-x-0 bottom-0 z-50 flex justify-center p-3 sm:inset-0 sm:items-center sm:bg-black/30" role="dialog" aria-labelledby="celebrate-title">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center shadow-2xl ring-1 ring-amber-200">
+      <Confetti />
+      <div className="animate-rise w-full max-w-sm rounded-2xl bg-white/95 p-5 text-center shadow-2xl ring-1 ring-amber-200 backdrop-blur">
         <p className="text-3xl tracking-widest text-amber-500" aria-label={`${stars} 星`}>
           {'★'.repeat(stars)}
           <span className="text-stone-300">{'★'.repeat(3 - stars)}</span>

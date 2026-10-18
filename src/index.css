@@ -24,3 +24,41 @@ button {
   40%, 80% { transform: translateX(4px); }
 }
 .animate-shake { animation: shake 0.35s ease-in-out; }
+
+@keyframes float {
+  0%, 100% { transform: translateY(0) rotate(-4deg); }
+  50% { transform: translateY(-6px) rotate(4deg); }
+}
+.animate-float { animation: float 3.2s ease-in-out infinite; display: inline-block; }
+
+.lift { transition: transform 0.18s ease, box-shadow 0.18s ease; }
+@media (hover: hover) {
+  .lift:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 10px 22px -10px rgba(180, 83, 9, 0.55); }
+}
+.lift:not(:disabled):active { transform: scale(0.98); }
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.animate-rise { animation: rise-in 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+
+@keyframes confetti-fall {
+  0% { transform: translate3d(0, -10vh, 0) rotate(0deg); opacity: 1; }
+  100% { transform: translate3d(var(--dx, 0), 105vh, 0) rotate(720deg); opacity: 0.9; }
+}
+.confetti {
+  position: fixed;
+  top: 0;
+  width: 8px;
+  height: 14px;
+  border-radius: 3px;
+  pointer-events: none;
+  animation: confetti-fall var(--t, 2.4s) cubic-bezier(0.3, 0.6, 0.5, 1) forwards;
+  z-index: 60;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-float, .animate-rise, .confetti, .animate-shake { animation: none !important; }
+  .confetti { display: none; }
+}

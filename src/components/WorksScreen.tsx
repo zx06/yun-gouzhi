@@ -3,11 +3,36 @@ import { useCrochetStore } from '../store/crochetStore'
 import { closedRounds, type SavedWork } from '../lib/storage'
 import { countProduced } from '../lib/pattern'
 import { exportSavedWork } from '../lib/export'
+import { Crochet3D } from './Crochet3D'
+import { currentColor } from '../lib/colors'
 
 function fmtTime(ts: number) {
   const d = new Date(ts)
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+function Preview3D({ w, onClose }: { w: SavedWork; onClose: () => void }) {
+  const webgl = useCrochetStore((s) => s.webgl)
+  const [failed, setFailed] = useState<string | null>(null)
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center" role="dialog" aria-label={`${w.name} 立体预览`} onClick={onClose}>
+      <div className="animate-rise w-full max-w-md rounded-2xl bg-white p-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h2 className="truncate font-semibold text-amber-950">{w.name} · 3D</h2>
+          <button type="button" onClick={onClose} className="min-h-[36px] rounded-lg px-3 text-sm font-medium text-amber-900 ring-1 ring-amber-300">
+            关闭
+          </button>
+        </div>
+        {webgl && !failed ? (
+          <Crochet3D rounds={w.rounds} base={w.yarnColor} changes={w.colors ?? []} onFail={setFailed} className="aspect-square w-full rounded-xl ring-1 ring-amber-200" label={`${w.name} 立体预览`} />
+        ) : (
+          <p className="rounded-xl bg-amber-50 p-6 text-center text-sm text-amber-800">{failed ? `3D 视图打不开（${failed}）` : '这台设备不支持 WebGL，无法显示 3D 预览'}</p>
+        )}
+        <p className="mt-2 text-center text-[11px] text-amber-800/80">拖动旋转 · 双指/滚轮缩放</p>
+      </div>
+    </div>
+  )
 }
 
 function WorkCard({ w }: { w: SavedWork }) {
@@ -20,6 +45,7 @@ function WorkCard({ w }: { w: SavedWork }) {
   const [name, setName] = useState(w.name)
   const [confirmDel, setConfirmDel] = useState(false)
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  const [preview, setPreview] = useState(false)
   const closed = closedRounds(w.rounds)
   const total = w.rounds.reduce((n, r) => n + r.length, 0)
   const last = closed.length ? countProduced(closed[closed.length - 1]) : 0
@@ -28,7 +54,12 @@ function WorkCard({ w }: { w: SavedWork }) {
   return (
     <li className="rounded-xl bg-white/90 p-3 ring-1 ring-amber-200" data-testid="work-card">
       <div className="flex items-center gap-2">
-        <span className="h-5 w-5 shrink-0 rounded-full ring-1 ring-black/10" style={{ backgroundColor: w.yarnColor }} aria-hidden />
+        <span
+          className="h-5 w-5 shrink-0 rounded-full ring-1 ring-black/10"
+          style={{ background: w.colors?.length ? `conic-gradient(${[w.yarnColor, ...w.colors.map((c) => c.color)].join(',')})` : w.yarnColor }}
+          aria-hidden
+          title={w.colors?.length ? `换线 ${w.colors.length} 次，当前 ${currentColor(w.yarnColor, w.colors)}` : undefined}
+        />
         {editing ? (
           <form
             className="flex flex-1 gap-2"
@@ -59,9 +90,12 @@ function WorkCard({ w }: { w: SavedWork }) {
       <p className="mt-1 text-xs text-amber-800/80">
         已完成 {closed.length} 圈{last ? `（最后一圈 ${last} 针）` : ''} · 共 {total} 针 · {fmtTime(w.updatedAt)}
       </p>
-      <div className="mt-2 grid grid-cols-3 gap-1.5">
+      <div className="mt-2 grid grid-cols-4 gap-1.5">
         <button type="button" onClick={() => startSandbox(w.id)} className={`${btn} bg-amber-500 text-white ring-amber-500`}>
           继续钩
+        </button>
+        <button type="button" onClick={() => setPreview(true)} data-testid="preview-3d" className={`${btn} bg-gradient-to-br from-sky-500 to-indigo-500 text-white ring-indigo-400`}>
+          3D 预览
         </button>
         <button
           type="button"
@@ -103,6 +137,7 @@ function WorkCard({ w }: { w: SavedWork }) {
         )}
       </div>
       {msg && <p className={`mt-1 text-xs ${msg.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{msg.text}</p>}
+      {preview && <Preview3D w={w} onClose={() => setPreview(false)} />}
     </li>
   )
 }

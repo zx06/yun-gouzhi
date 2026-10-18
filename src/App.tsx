@@ -1,4 +1,5 @@
-import { CrochetCanvas } from './components/CrochetCanvas'
+import { CanvasArea } from './components/CanvasArea'
+import { MuteButton } from './components/ViewToggle'
 import { StitchToolbar } from './components/StitchToolbar'
 import { SandboxPanel } from './components/SandboxPanel'
 import { LevelPanel } from './components/LevelPanel'
@@ -29,11 +30,14 @@ function GameScreen() {
         <h1 className="truncate text-base font-semibold text-amber-950" data-testid="game-title">
           {mode === 'level' ? level?.title : (workName ?? '自由沙盒')}
         </h1>
-        <NotationToggle />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <MuteButton />
+          <NotationToggle />
+        </div>
       </header>
       <main className="mx-auto grid w-full max-w-5xl flex-1 gap-3 px-3 pb-8 pt-2 md:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex flex-col gap-3">
-          <CrochetCanvas />
+          <CanvasArea />
           {mode === 'level' && level && <p className="text-center text-xs text-amber-800/90">{level.description}</p>}
         </div>
         <div className="flex flex-col gap-3">

@@ -5,7 +5,10 @@ import { stitchSymbol, STITCH_LABELS, type Notation, type StitchType } from '../
 import { COASTER_LEVEL, BALL_PATTERN, type Level } from '../patterns/levels'
 import { customLevelToLevel } from '../patterns/custom'
 import * as S from '../lib/storage'
-import type { Application } from 'pixi.js'
+import { changeColor, currentColor, trimColorChanges, type ColorChange } from '../lib/colors'
+import { loadSettings, resolveView, saveSettings, type Settings, type ViewMode } from '../lib/settings'
+import { hasWebGL } from '../lib/webgl'
+import { sound, type Sfx } from '../lib/sound'
 
 export type GameMode = 'menu' | 'works' | 'level' | 'sandbox'
 
@@ -80,8 +83,30 @@ export function starsFor(mistakes: number): number {
   return mistakes === 0 ? 3 : mistakes <= 3 ? 2 : 1
 }
 
+/** 撤销栈的一项：作品 + 当时的换线状态 */
+interface UndoEntry {
+  work: Work
+  base: string
+  changes: ColorChange[]
+}
+
+const totalStitches = (w: Work) => w.rounds.reduce((n, r) => n + r.length, 0)
+
 interface CrochetState extends Prefs {
   mode: GameMode
+  /** 沙盒作品的起始颜色与换线记录（关卡里不用） */
+  baseColor: string
+  colorChanges: ColorChange[]
+  settings: Settings
+  /** 设备能否用 WebGL（3D 需要） */
+  webgl: boolean
+  /** 实际显示的视图 */
+  view: ViewMode
+  viewNotice: string | null
+  /** 当前画布的截图函数（2D / 3D 各自注册），导出 PNG 用 */
+  snapshotRef: { current: (() => Promise<string> | string) | null }
+  /** 通关时触发 3D 转盘展示 */
+  celebrateTick: number
   level: Level | null
   work: Work
   /** 沙盒里正在钩的作品 id */
@@ -89,15 +114,18 @@ interface CrochetState extends Prefs {
   data: S.AppData
   /** 存档提示（迁移 / 备份 / 写入失败） */
   storageNotice: string | null
-  undoStack: Work[]
+  undoStack: UndoEntry[]
   hint: string | null
   hintKind: 'error' | 'info'
   mistakes: number
   completed: boolean
   /** increments on every successful stitch, used to trigger animations */
   tick: number
-  rendererRef: { current: Application | null }
 
+  setView: (v: ViewMode) => void
+  /** 3D 初始化失败 / 上下文丢失：本次切回 2D（不改用户的选择） */
+  fail3D: (reason?: string) => void
+  toggleMute: () => void
   goMenu: () => void
   openWorks: () => void
   startLevel: (level?: Level) => void
@@ -134,6 +162,11 @@ function persistPrefs(s: Prefs) {
 }
 
 const initialPrefs = sanitizePrefs(load(PREFS_KEY), load(PREFS_V1_KEY))
+const initialSettings = loadSettings(kv)
+const webglOk = typeof document !== 'undefined' && hasWebGL()
+sound.muted = initialSettings.muted
+
+const SFX_FOR: Record<StitchType, Sfx> = { sc: 'stitch', inc: 'inc', dec: 'dec', ch: 'ch' }
 const loaded = S.loadData(kv, { yarnColor: initialPrefs.yarnColor })
 let initialNotice: string | null = null
 if (loaded.dirty && !S.saveData(kv, loaded.data)) initialNotice = '浏览器不允许保存（隐私模式或空间已满），作品只在本次打开期间有效。'
@@ -149,9 +182,14 @@ export const useCrochetStore = create<CrochetState>((set, get) => {
 
   /** 沙盒里的作品变化后写回 */
   const persistWork = (work: Work) => {
-    const { workId, data, yarnColor } = get()
+    const { workId, data, baseColor, colorChanges } = get()
     if (!workId) return
-    commit(S.updateWork(data, workId, { rounds: work.rounds, yarnColor }))
+    commit(S.updateWork(data, workId, { rounds: work.rounds, yarnColor: baseColor, colors: colorChanges }))
+  }
+
+  const snap = (): UndoEntry => {
+    const s = get()
+    return { work: s.work, base: s.baseColor, changes: s.colorChanges }
   }
 
   const enterSandbox = (w: S.SavedWork, data: S.AppData) => {
@@ -161,7 +199,9 @@ export const useCrochetStore = create<CrochetState>((set, get) => {
       level: null,
       workId: w.id,
       work: { rounds: w.rounds.map((r) => [...r]) },
-      yarnColor: w.yarnColor,
+      baseColor: w.yarnColor,
+      colorChanges: w.colors ?? [],
+      yarnColor: currentColor(w.yarnColor, w.colors ?? []),
       undoStack: [],
       hint: null,
       mistakes: 0,
@@ -183,22 +223,50 @@ export const useCrochetStore = create<CrochetState>((set, get) => {
     mistakes: 0,
     completed: false,
     tick: 0,
-    rendererRef: { current: null },
+    baseColor: initialPrefs.yarnColor,
+    colorChanges: [],
+    settings: initialSettings,
+    webgl: webglOk,
+    view: resolveView(initialSettings, webglOk),
+    viewNotice: null,
+    snapshotRef: { current: null },
+    celebrateTick: 0,
+
+    setView: (v) => {
+      const s = get()
+      if (v === '3d' && !s.webgl) return set({ viewNotice: '这台设备不支持 WebGL，只能用 2D 视图' })
+      const settings = { ...s.settings, view: v }
+      set({ settings, view: v, viewNotice: null })
+      saveSettings(kv, settings)
+    },
+    fail3D: (reason) => {
+      if (get().view !== '3d') return
+      set({ view: '2d', viewNotice: `3D 视图打不开${reason ? `（${reason}）` : ''}，已切换到 2D` })
+    },
+    toggleMute: () => {
+      const settings = { ...get().settings, muted: !get().settings.muted }
+      sound.muted = settings.muted
+      set({ settings })
+      saveSettings(kv, settings)
+      if (!settings.muted) sound.play('tap')
+    },
 
     goMenu: () => set({ mode: 'menu', level: null, hint: null, completed: false, workId: null }),
     openWorks: () => set({ mode: 'works', level: null, hint: null, completed: false, workId: null }),
 
     startLevel: (level = COASTER_LEVEL) =>
-      set({
+      set((s) => ({
         mode: 'level',
         level,
         workId: null,
+        baseColor: s.yarnColor,
+        colorChanges: [],
         work: emptyWork(),
         undoStack: [],
         hint: null,
         mistakes: 0,
         completed: false,
-      }),
+      })),
 
     startCustomLevel: (id) => {
       const l = get().data.customLevels.find((x) => x.id === id)
@@ -257,7 +325,15 @@ export const useCrochetStore = create<CrochetState>((set, get) => {
     setYarnColor: (yarnColor) => {
       set({ yarnColor })
       persistPrefs(get())
-      if (get().mode === 'sandbox') persistWork(get().work)
+      const s = get()
+      if (s.mode === 'sandbox') {
+        // 换线：已钩的针保持原色，之后的针用新颜色
+        const next = changeColor(s.baseColor, s.colorChanges, totalStitches(s.work), yarnColor)
+        set({ baseColor: next.base, colorChanges: next.changes })
+        persistWork(s.work)
+      } else {
+        set({ baseColor: yarnColor, colorChanges: [] })
+      }
     },
     setNotation: (notation) => {
       set({ notation })
@@ -289,6 +365,7 @@ export const useCrochetStore = create<CrochetState>((set, get) => {
             hintKind: 'error',
             mistakes: s.mistakes + 1,
           })
+          sound.play('error')
           return
         }
       }
@@ -296,6 +373,7 @@ export const useCrochetStore = create<CrochetState>((set, get) => {
       const res = applyStitch(s.work, type, { ringSize })
       if (res.error) {
         set({ hint: res.error, hintKind: 'error' })
+        sound.play('error')
         return
       }
       let work = res.work
@@ -318,12 +396,14 @@ export const useCrochetStore = create<CrochetState>((set, get) => {
       }
       set({
         work,
-        undoStack: [...s.undoStack.slice(-499), s.work],
+        undoStack: [...s.undoStack.slice(-499), snap()],
         hint,
         hintKind: 'info',
         completed,
         tick: s.tick + 1,
+        celebrateTick: completed ? s.celebrateTick + 1 : s.celebrateTick,
       })
+      sound.play(completed ? 'win' : res.roundClosed ? 'round' : SFX_FOR[type])
       if (completed) persistPrefs(get())
       if (s.mode === 'sandbox') persistWork(work)
     },
@@ -333,7 +413,8 @@ export const useCrochetStore = create<CrochetState>((set, get) => {
       if (s.mode !== 'sandbox') return
       const res = closeRing(s.work)
       if (res.error) return set({ hint: res.error, hintKind: 'error' })
-      set({ work: res.work, undoStack: [...s.undoStack, s.work], hint: '魔术环已闭合，开始第 2 圈', hintKind: 'info', tick: s.tick + 1 })
+      set({ work: res.work, undoStack: [...s.undoStack, snap()], hint: '魔术环已闭合，开始第 2 圈', hintKind: 'info', tick: s.tick + 1 })
+      sound.play('round')
       persistWork(res.work)
     },
 
@@ -341,14 +422,40 @@ export const useCrochetStore = create<CrochetState>((set, get) => {
       const s = get()
       const prev = s.undoStack[s.undoStack.length - 1]
       if (!prev) return
-      set({ work: prev, undoStack: s.undoStack.slice(0, -1), hint: '已撤销一针', hintKind: 'info', completed: false, tick: s.tick + 1 })
-      if (s.mode === 'sandbox') persistWork(prev)
+      // 撤销恢复当时的换线状态；如果刚换了线还没钩，保留新颜色
+      const curTotal = totalStitches(s.work)
+      const prevTotal = totalStitches(prev.work)
+      let base = prev.base
+      let changes = trimColorChanges(prev.changes, prevTotal)
+      const pending = curTotal > 0 ? s.colorChanges.find((c) => c.from === curTotal) : undefined
+      if (pending && s.mode === 'sandbox') ({ base, changes } = changeColor(base, changes, prevTotal, pending.color))
+      set({
+        work: prev.work,
+        baseColor: base,
+        colorChanges: changes,
+        yarnColor: s.mode === 'sandbox' ? currentColor(base, changes) : s.yarnColor,
+        undoStack: s.undoStack.slice(0, -1),
+        hint: '已撤销一针',
+        hintKind: 'info',
+        completed: false,
+        tick: s.tick + 1,
+      })
+      sound.play('tap')
+      if (s.mode === 'sandbox') persistWork(prev.work)
     },
 
     clearSandbox: () => {
       const s = get()
       if (s.mode !== 'sandbox') return
-      set({ work: emptyWork(), undoStack: [...s.undoStack, s.work], hint: '画布已清空（可撤销）', hintKind: 'info', tick: s.tick + 1 })
+      set({
+        work: emptyWork(),
+        undoStack: [...s.undoStack, snap()],
+        baseColor: s.yarnColor,
+        colorChanges: [],
+        hint: '画布已清空（可撤销）',
+        hintKind: 'info',
+        tick: s.tick + 1,
+      })
       persistWork(emptyWork())
     },
   }

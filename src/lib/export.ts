@@ -16,9 +16,9 @@ function safeFileName(name: string) {
 
 /** 当前画布上的作品（沙盒里是正在钩的作品，关卡里是当前进度）。 */
 export function buildProjectJson() {
-  const { work, yarnColor, data, workId, level } = useCrochetStore.getState()
+  const { work, baseColor, colorChanges, data, workId, level } = useCrochetStore.getState()
   const saved = data.works.find((w) => w.id === workId)
-  return buildWorkExport({ name: saved?.name ?? level?.title ?? '云钩织作品', yarnColor, rounds: work.rounds })
+  return buildWorkExport({ name: saved?.name ?? level?.title ?? '云钩织作品', yarnColor: baseColor, colors: colorChanges, rounds: work.rounds })
 }
 
 export function downloadJson(obj: unknown, filename: string) {
@@ -38,8 +38,8 @@ export function exportSavedWork(w: SavedWork) {
 }
 
 export async function exportCanvasPng() {
-  const app = useCrochetStore.getState().rendererRef.current
-  if (!app) return
-  const url = await app.renderer.extract.base64({ target: app.stage, format: 'png' })
+  const take = useCrochetStore.getState().snapshotRef.current
+  if (!take) return
+  const url = await take()
   download(`yun-gouzhi-${Date.now()}.png`, url)
 }

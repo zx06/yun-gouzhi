@@ -5,6 +5,7 @@
  */
 import { STITCH_COST, type StitchType } from '../types/stitch'
 import { countConsumed, countProduced, formatPattern } from './pattern'
+import { sanitizeColorChanges, type ColorChange } from './colors'
 
 export const DATA_KEY = 'yun-gouzhi-data-v3'
 /** 一期沙盒自动存档（单份作品） */
@@ -28,7 +29,10 @@ export interface SavedWork {
   name: string
   /** 同 engine Work.rounds：最后一项是进行中的圈（可为空） */
   rounds: StitchType[][]
+  /** 起始毛线颜色 */
   yarnColor: string
+  /** 换线记录（四期新增，可选；旧存档没有这个字段） */
+  colors?: ColorChange[]
   createdAt: number
   updatedAt: number
 }
@@ -134,11 +138,13 @@ function sanitizeWork(x: unknown, now: number): SavedWork | null {
   const o = x as Record<string, unknown>
   if (workRoundsError(o.rounds)) return null
   const rounds = (o.rounds as StitchType[][]).map((r) => [...r])
+  const colors = sanitizeColorChanges(o.colors)
   return {
     id: typeof o.id === 'string' && o.id ? o.id : newId('w'),
     name: cleanName(o.name, '未命名作品'),
     rounds,
     yarnColor: isColor(o.yarnColor) ? o.yarnColor : '#e11d48',
+    ...(colors.length ? { colors } : {}),
     createdAt: num(o.createdAt, now),
     updatedAt: num(o.updatedAt, now),
   }
@@ -303,7 +309,7 @@ export function createWork(data: AppData, name: string, yarnColor: string, now =
   return { data: { ...data, works: [work, ...data.works], lastWorkId: work.id }, work }
 }
 
-export function updateWork(data: AppData, id: string, patch: Partial<Pick<SavedWork, 'rounds' | 'yarnColor' | 'name'>>, now = Date.now()): AppData {
+export function updateWork(data: AppData, id: string, patch: Partial<Pick<SavedWork, 'rounds' | 'yarnColor' | 'name' | 'colors'>>, now = Date.now()): AppData {
   return {
     ...data,
     works: data.works.map((w) =>
@@ -331,6 +337,7 @@ export function duplicateWork(data: AppData, id: string, now = Date.now()): { da
     id: newId('w'),
     name: uniqueName(`${src.name} 副本`, data.works.map((w) => w.name)),
     rounds: src.rounds.map((r) => [...r]),
+    ...(src.colors?.length ? { colors: src.colors.map((c) => ({ ...c })) } : {}),
     createdAt: now,
     updatedAt: now,
   }
@@ -405,6 +412,7 @@ export interface WorkExport {
   version: typeof DATA_VERSION
   name: string
   yarnColor: string
+  colors?: ColorChange[]
   rounds: StitchType[][]
   closedRounds: number
   patternZh: string
@@ -412,7 +420,7 @@ export interface WorkExport {
   exportedAt: string
 }
 
-export function buildWorkExport(work: Pick<SavedWork, 'name' | 'yarnColor' | 'rounds'>, now = new Date()): WorkExport {
+export function buildWorkExport(work: Pick<SavedWork, 'name' | 'yarnColor' | 'rounds' | 'colors'>, now = new Date()): WorkExport {
   const closed = closedRounds(work.rounds)
   return {
     app: 'yun-gouzhi',
@@ -420,6 +428,7 @@ export function buildWorkExport(work: Pick<SavedWork, 'name' | 'yarnColor' | 'ro
     version: DATA_VERSION,
     name: work.name,
     yarnColor: work.yarnColor,
+    ...(work.colors?.length ? { colors: work.colors.map((c) => ({ ...c })) } : {}),
     rounds: work.rounds.map((r) => [...r]),
     closedRounds: closed.length,
     patternZh: formatPattern(closed, 'zh'),
@@ -429,7 +438,7 @@ export function buildWorkExport(work: Pick<SavedWork, 'name' | 'yarnColor' | 'ro
 }
 
 export type ImportResult =
-  | { ok: true; work: Pick<SavedWork, 'name' | 'yarnColor' | 'rounds'> }
+  | { ok: true; work: Pick<SavedWork, 'name' | 'yarnColor' | 'rounds' | 'colors'> }
   | { ok: false; error: string }
 
 /**
@@ -464,12 +473,14 @@ export function parseWorkImport(text: string): ImportResult {
   if (isRoundsShape(rounds) && rounds.length === 0) rounds = [[]]
   const err = workRoundsError(rounds)
   if (err) return { ok: false, error: `作品数据有误：${err}` }
+  const colors = sanitizeColorChanges(o.colors)
   return {
     ok: true,
     work: {
       name: cleanName(o.name, '导入的作品'),
       yarnColor: isColor(o.yarnColor) ? o.yarnColor : '#e11d48',
       rounds: (rounds as StitchType[][]).map((x) => [...x]),
+      ...(colors.length ? { colors } : {}),
     },
   }
 }
@@ -482,6 +493,7 @@ export function importWork(data: AppData, text: string, now = Date.now()): { dat
     name: uniqueName(res.work.name, data.works.map((w) => w.name)),
     rounds: res.work.rounds,
     yarnColor: res.work.yarnColor,
+    ...(res.work.colors ? { colors: res.work.colors } : {}),
     createdAt: now,
     updatedAt: now,
   }

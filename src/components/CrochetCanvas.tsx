@@ -3,6 +3,7 @@ import { Application, Container, Graphics } from 'pixi.js'
 import { useCrochetStore } from '../store/crochetStore'
 import { layoutWork, BASE_RADIUS, STEP, type PlacedStitch } from '../lib/geometry'
 import { countProduced } from '../lib/pattern'
+import { colorAt } from '../lib/colors'
 
 const SIZE = 640
 const POP_MS = 260
@@ -65,10 +66,11 @@ export function CrochetCanvas() {
   const redrawRef = useRef<() => void>(() => {})
 
   const work = useCrochetStore((s) => s.work)
-  const yarnColor = useCrochetStore((s) => s.yarnColor)
+  const baseColor = useCrochetStore((s) => s.baseColor)
+  const colorChanges = useCrochetStore((s) => s.colorChanges)
   const level = useCrochetStore((s) => s.level)
   const completed = useCrochetStore((s) => s.completed)
-  const rendererRef = useCrochetStore((s) => s.rendererRef)
+  const snapshotRef = useCrochetStore((s) => s.snapshotRef)
 
   useEffect(() => {
     let destroyed = false
@@ -91,7 +93,7 @@ export function CrochetCanvas() {
           return
         }
         appRef.current = app
-        rendererRef.current = app
+        snapshotRef.current = () => app.renderer.extract.base64({ target: app.stage, format: 'png' })
         app.canvas.style.width = '100%'
         app.canvas.style.height = 'auto'
         app.canvas.style.display = 'block'
@@ -114,14 +116,14 @@ export function CrochetCanvas() {
       })
     return () => {
       destroyed = true
-      rendererRef.current = null
+      snapshotRef.current = null
       layers.current = null
       if (appRef.current) {
         appRef.current.destroy(true, { children: true })
         appRef.current = null
       }
     }
-  }, [rendererRef])
+  }, [snapshotRef])
 
   useEffect(() => {
     const ringSize = level ? countProduced(level.rounds[0]) : undefined
@@ -132,7 +134,8 @@ export function CrochetCanvas() {
       if (!known.current.has(s.id)) births.current.set(s.id, now)
     }
     known.current = ids
-    const color = hexNum(yarnColor)
+    const color = hexNum(colorChanges.length ? colorChanges[colorChanges.length - 1].color : baseColor)
+    const paint = (seq: number) => hexNum(colorAt(seq, baseColor, colorChanges))
     const targetRounds = level ? level.rounds.length : work.rounds.length
 
     redrawRef.current = () => {
@@ -173,7 +176,7 @@ export function CrochetCanvas() {
           if (p >= 1) births.current.delete(s.id)
           else scale = 0.3 + 0.9 * Math.sin(Math.min(1, p) * Math.PI * 0.75) // overshoot pop
         }
-        drawStitch(L.st, s, color, scale)
+        drawStitch(L.st, s, paint(s.seq), scale)
       }
 
       L.hook.clear()
@@ -195,7 +198,7 @@ export function CrochetCanvas() {
       }
     }
     redrawRef.current()
-  }, [work, yarnColor, level, completed])
+  }, [work, baseColor, colorChanges, level, completed])
 
   return (
     <div
@@ -203,6 +206,7 @@ export function CrochetCanvas() {
       className="mx-auto aspect-square w-full max-w-[min(100%,560px)] overflow-hidden rounded-2xl shadow-inner ring-1 ring-amber-200"
       role="img"
       aria-label="钩织画布"
+      data-testid="view-2d"
     />
   )
 }
