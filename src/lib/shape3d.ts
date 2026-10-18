@@ -161,7 +161,8 @@ export function buildShape(rounds: StitchType[][], opts: { ringSize?: number } =
         // 螺旋：一圈之内从上一圈的位置渐渐升到本圈
         const r = lerp(prev.r, P.r, frac)
         const y = lerp(prev.y, P.y, frac)
-        const theta = 2 * Math.PI * frac + pi * 0.35
+        // 不再逐圈错开角度：每针正好立在它钩入的父针上方（加针的两针分在父针两侧）
+        const theta = 2 * Math.PI * frac
         const er: Vec3 = [Math.cos(theta), 0, Math.sin(theta)]
         const tangent: Vec3 = [-Math.sin(theta), 0, Math.cos(theta)]
         const up: Vec3 = [Math.cos(P.phi) * er[0], Math.sin(P.phi), Math.cos(P.phi) * er[2]]

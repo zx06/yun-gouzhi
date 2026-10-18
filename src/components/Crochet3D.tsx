@@ -27,6 +27,7 @@ export function Crochet3D({ rounds, ringSize, base, changes, celebrateTick = 0, 
   failRef.current = onFail
   const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [count, setCount] = useState(0)
+  const [stats, setStats] = useState({ tris: 0, lod: '' })
 
   useEffect(() => {
     let disposed = false
@@ -46,6 +47,7 @@ export function Crochet3D({ rounds, ringSize, base, changes, celebrateTick = 0, 
         sceneRef.current = scene
         scene.update(latest.current)
         setCount(scene.stitchCount)
+        setStats({ tris: scene.yarnTriangles, lod: scene.lod })
         if (snapshotRef) snapshotRef.current = () => scene.snapshot()
         setState('ready')
       })
@@ -67,6 +69,7 @@ export function Crochet3D({ rounds, ringSize, base, changes, celebrateTick = 0, 
     if (!scene) return
     scene.update({ rounds, ringSize, base, changes })
     setCount(scene.stitchCount)
+    setStats({ tris: scene.yarnTriangles, lod: scene.lod })
   }, [rounds, ringSize, base, changes])
 
   useEffect(() => {
@@ -82,6 +85,8 @@ export function Crochet3D({ rounds, ringSize, base, changes, celebrateTick = 0, 
       data-testid="view-3d"
       data-ready={state === 'ready' ? 'true' : 'false'}
       data-stitches={count}
+      data-yarn-tris={stats.tris}
+      data-lod={stats.lod}
     >
       {state === 'loading' && (
         <div className="absolute inset-0 flex items-center justify-center text-sm text-amber-700/80">

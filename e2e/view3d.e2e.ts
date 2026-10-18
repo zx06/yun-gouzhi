@@ -93,3 +93,51 @@ test('没有 WebGL 时自动用 2D，3D 按钮不可用', async ({ page }) => {
   await expect(page.getByTestId('view-3d')).toHaveCount(0)
   await expect(page.getByTestId('view-toggle-3d')).toBeDisabled()
 })
+
+test('3D 毛线针目：细毛线管（顶链 + V 字 + 钩入上圈），手机降级分段，画面不是空白', { tag: '@smoke' }, async ({ page, isMobile }) => {
+  // 玩偶头：加针 + 平钩 + 减针，覆盖 sc / inc / dec 三种拓扑
+  const X = 'sc', V = 'inc', A = 'dec'
+  const r = (b: string[], n: number) => Array.from({ length: n }, () => b).flat()
+  const rounds = [r([X], 6), r([V], 6), r([X, V], 6), r([X, X, V], 6), r([X], 24), r([X], 24), r([X, X, A], 6), r([X, A], 6), r([A], 6), []]
+  const total = 6 + 12 + 18 + 24 + 24 + 24 + 18 + 12 + 6
+  const data = {
+    version: 3,
+    works: [{ id: 'w-head', name: '小球', rounds, yarnColor: '#e11d48', createdAt: 1, updatedAt: 1 }],
+    customLevels: [],
+    lastWorkId: null,
+    migrated: ['yun-gouzhi-sandbox-v2'],
+  }
+  await page.addInitScript((d) => {
+    if (!localStorage.getItem('yun-gouzhi-data-v3')) localStorage.setItem('yun-gouzhi-data-v3', d)
+  }, JSON.stringify(data))
+  await gotoMenu(page)
+  await page.getByTestId('open-works').click()
+  await workCard(page, '小球').getByTestId('preview-3d').click()
+  const v3 = page.getByRole('dialog', { name: '小球 立体预览' }).getByTestId('view-3d')
+  await expect(v3).toHaveAttribute('data-ready', 'true', { timeout: 20_000 })
+  await expect(v3).toHaveAttribute('data-stitches', String(total))
+  await expect(v3).toHaveAttribute('data-lod', isMobile ? 'low' : 'high')
+  // 每针 5 段毛线管：桌面 12×7、手机 8×5 分段
+  const per = isMobile ? 5 * 8 * 5 * 2 : 5 * 12 * 7 * 2
+  await expect(v3).toHaveAttribute('data-yarn-tris', String(total * per))
+
+  // 画面中心应该是毛线颜色（偏红），不是背景米色
+  await page.waitForTimeout(500)
+  const png = await v3.locator('canvas').screenshot()
+  const center = await page.evaluate(async (b64) => {
+    const img = new Image()
+    img.src = `data:image/png;base64,${b64}`
+    await img.decode()
+    const c = document.createElement('canvas')
+    c.width = img.width
+    c.height = img.height
+    const g = c.getContext('2d')!
+    g.drawImage(img, 0, 0)
+    const w = Math.floor(img.width * 0.2)
+    const d = g.getImageData(Math.floor(img.width / 2 - w / 2), Math.floor(img.height / 2 - w / 2), w, w).data
+    let red = 0
+    for (let i = 0; i < d.length; i += 4) if (d[i] > d[i + 1] + 40 && d[i] > d[i + 2] + 30) red++
+    return red / (d.length / 4)
+  }, png.toString('base64'))
+  expect(center).toBeGreaterThan(0.3)
+})
